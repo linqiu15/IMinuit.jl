@@ -16,3 +16,9 @@ For functions defined, click [![Dev](https://img.shields.io/badge/docs-dev-blue.
 
 For interactive examples, click
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/fkguo/IMinuit.jl/master?urlpath=lab%2Ftree%2Fdocs%2Fexample.ipynb)
+
+# IMinuit(dev)
+- [x] Pinning down iminuit version at "2.11.2"
+- [ ] Accommodating the Minuit.jl interference to upgraded iminuit API.
+- [ ] Adding or deleting functions adapting from [iminuit's references](https://iminuit.readthedocs.io/en/stable/reference.html#)
+- [ ] Adding supports for other probabilistic fitting, like Maximum Likelihood estimation and Bayesian estimation.
