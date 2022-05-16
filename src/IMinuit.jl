@@ -2,9 +2,9 @@ __precompile__() # this module is safe to precompile
 module IMinuit
 
 using PyCall: PyObject, pycall, PyNULL, PyAny, PyVector, pyimport_conda, pyimport, pytype_mapping
-import PyCall: PyObject, pycall
+import PyCall: PyObject, pycall, set!
 # import PyCall: hasproperty # Base.hasproperty in Julia 1.2
-import Base: convert, ==, isequal, hash, hasproperty,  haskey
+import Base: convert, ==, isequal, hash, hasproperty, haskey
 
 using ForwardDiff: gradient
 
@@ -24,13 +24,13 @@ struct LazyHelp
     keys::Tuple{Vararg{String}}
     LazyHelp(o) = new(o, ())
     LazyHelp(o, k::AbstractString) = new(o, (k,))
-    LazyHelp(o, k1::AbstractString, k2::AbstractString) = new(o, (k1,k2))
+    LazyHelp(o, k1::AbstractString, k2::AbstractString) = new(o, (k1, k2))
     LazyHelp(o, k::Tuple{Vararg{AbstractString}}) = new(o, k)
 end
 function show(io::IO, ::MIME"text/plain", h::LazyHelp)
     o = h.o
     for k in h.keys
-        o = getproperty(o, k) 
+        o = getproperty(o, k)
     end
     if hasproperty(o, "__doc__")
         print(io, "Docstring pulled from the Python `iminuit`:\n\n")
@@ -84,7 +84,6 @@ include("FitStructs.jl")
 
 # Wrappers of the iminuit functions
 @doc raw"""
-    Minuit(fcn; kwds...)
     Minuit(fcn, start; kwds...)
     Minuit(fcn, m::AbatractFit; kwds...)
 
@@ -105,70 +104,35 @@ one can use external code (e.g., `using ForwardDiff: gradient`) to compute the g
 `gradfun(par) = gradient(fcn, par)`, and include `grad = gradfun` as a keyword argument.
 
 
-If `fcn` is defined as `fcn(a, b)`, then the starting values need to be
-set as `Minuit(fcn, a = 1, b = 0)`.
+From `iminuit=2.11.2`:
 
-From `iminuit`:
-
-`Minuit(fcn, throw_nan=False, pedantic=True, forced_parameters=None, print_level=0, 
-        errordef=None, grad=None, use_array_call=False, **kwds)`
+`Minuit(fcn: Callable, *args: Union[float, iminuit.util.Indexable[float]], grad: Optional[Callable]
+ = None, name: Optional[Collection[str]] = None, **kwds: float)`
 
 """
-function Minuit(fcn; kwds...)::Fit
-    forced_parameters = Tuple(func_argnames(fcn)) # get the argument lists of fcn
-    return iminuit.Minuit(fcn; forced_parameters= forced_parameters, pedantic = false, kwds...)
-end
-
-Minuit(fcn, start::AbstractVector; kwds...)::ArrayFit =  iminuit.Minuit.from_array_func(fcn, start; pedantic = false, kwds...)
-Minuit(fcn, start::Tuple; kwds...)::ArrayFit =  iminuit.Minuit.from_array_func(fcn, start; pedantic = false, kwds...)
-
-Minuit(fcn, m::ArrayFit; kwds...) = Minuit(fcn, args(m); (Symbol(k) => v for (k,v) in m.fitarg)...,  kwds...)
-Minuit(fcn, m::Fit; kwds...) = Minuit(fcn; (Symbol(k) => v for (k,v) in m.fitarg)...,  kwds...)
-
-# nsplit = 1, nsplit option removed since iminuit v1.5.0
-function migrad(f::AbstractFit; ncall = 1000, resume = true, precision = nothing) 
-    return pycall(f.migrad, PyObject, ncall, resume, precision)
-end
-
-
-hesse(f::AbstractFit; maxcall = 0) = pycall(f.hesse, PyObject, maxcall)
-
-
-function minos(f::AbstractFit; var = nothing, sigma = 1, maxcall = 0)
-    return pycall(f.minos, PyObject, var, sigma, maxcall)
-end
-
-
-matrix(f::AbstractFit; kws...) = pycall(PyObject(f).matrix, PyObject, kws...)
-
-function args(o::AbstractFit)::Vector{Float64}
-    _a::PyObject = o.args;  _n::Int = length(_a)
-    _res = zeros(_n)
-    @views for i = 1:_n
-        _res[i] = get(_a, i-1)
+function Minuit(fcn, start; kwds...)::Fit
+    if haskey(kwds, :name)
+        tmp_fit = iminuit.Minuit(fcn, start, name=kwds[:name])
+    else
+        tmp_fit = iminuit.Minuit(fcn, start)
     end
-    return _res
-end
-
-for fun in [:contour, :mncontour, :draw_contour, :draw_mncontour]
-    :( ($fun)(f::AbstractFit, par1, par2; kws...) = f.$fun(par1, par2; kws...) ) |> eval
-end
-
-for fun in [:profile, :draw_profile, :mnprofile, :draw_mnprofile]
-    :( ($fun)(f::AbstractFit, par1; kws...) = f.$fun(par1; kws...) ) |> eval
-end
-
-
-for f in [:migrad, :minos, :hesse, :matrix, :args, :contour, :mncontour, :profile, 
-          :mnprofile, :draw_mncontour, :draw_contour, :draw_profile, :draw_mnprofile]
-    sf = string(f)
-    @eval @doc LazyHelp(mMinuit, $sf)  function $f(ars...; kws...) 
-        if !hasproperty(mMinuit, $sf)
-            error("iminuit ", version, " does not have iminuit.Minuit", $sf)
+    for k in keys(kwds)
+        if k == :error
+            tmp_fit.errors = kwds[k]
+        elseif match(r"^fix_", string(k)) != nothing
+            set!(tmp_fit.fixed, string(k)[5:end], kwds[k])
+        elseif match(r"^limit_", string(k)) != nothing
+            set!(tmp_fit.limits, string(k)[7:end], kwds[k])
         end
-        return pycall(mMinuit.$sf, PyAny, ars...; kws...)
     end
+
+    return tmp_fit
 end
+Minuit(fcn, m::ArrayFit; kwds...) = Minuit(fcn, args(m); (Symbol(k) => v for (k, v) in m.fitarg)..., kwds...)
+Minuit(fcn, m::Fit; kwds...) = Minuit(fcn; (Symbol(k) => v for (k, v) in m.fitarg)..., kwds...)
+# Todo
+
+
 
 #########################################################################
 
